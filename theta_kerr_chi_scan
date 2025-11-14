@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""
+theta_kerr_chi_scan.py
+
+Scan en el paràmetre EFT χ per a spin quasi extremal a* ≈ 0.99.
+
+- Fixem M, a*, σ_K, σ_Π.
+- Variarem ε (i per tant χ).
+- Per a cada punt:
+  - calculem <G>_H,
+  - estimem Δr_ph/r_ph,
+  - avaluem el residual de la First Law,
+  - fem triage (PASS/REJECT).
+
+Això és útil per mostrar l'escalat lineal Δr_ph/r_ph ∝ χ en el Paper 2.
+"""
+
+from typing import List, Tuple
+
+from theta_kerr_horizon_gate import KerrBH, horizon_gate_profile
+from theta_kerr_diagnostics import (
+    ThetaKerrParams,
+    photon_sphere_shift_estimate,
+    first_law_residual,
+    triage_decision,
+)
+
+
+def chi_scan(
+    M: float = 10.0,
+    a_star: float = 0.99,
+    Lambda: float = 100.0,
+    sigma_K: float = 0.1,
+    sigma_Pi: float = 0.3,
+    eps_values: List[float] | None = None,
+) -> List[Tuple[float, float, float, float, float, str]]:
+    """
+    Fa un scan en ε (i per tant en χ) mantenint fixos M, a*, Λ.
+
+    Retorna una llista de tuples:
+
+      (eps, chi, <G>_H, Δr_ph/r_ph_min, Δr_ph/r_ph_max, decisio)
+    """
+
+    if eps_values is None:
+        # Exemple: tres ordres de magnitud en ε
+        eps_values = [1.0e-4, 1.0e-3, 1.0e-2]
+
+    results: List[Tuple[float, float, float, float, float, str]] = []
+
+    # Primer calculem <G>_H una sola vegada (no depèn d'ε)
+    params_ref = ThetaKerrParams(
+        M=M,
+        eps=eps_values[0],
+        Lambda=Lambda,
+        a_star=a_star,
+        sigma_K=sigma_K,
+        sigma_Pi=sigma_Pi,
+    )
+    bh_ref = KerrBH(M=params_ref.M, a=params_ref.a)
+    _, _, _, G_avg_ref = horizon_gate_profile(
+        bh_ref,
+        sigma_K=params_ref.sigma_K,
+        sigma_Pi=params_ref.sigma_Pi,
+        n_theta=400,
+    )
+
+    for eps in eps_values:
+        params = ThetaKerrParams(
+            M=M,
+            eps=eps,
+            Lambda=Lambda,
+            a_star=a_star,
+            sigma_K=sigma_K,
+            sigma_Pi=sigma_Pi,
+        )
+
+        chi = params.chi
+        G_avg = G_avg_ref  # mateix gate, perquè M i a* són els mateixos
+
+        # Estimació Δr_ph/r_ph
+        dmin, dmax = photon_sphere_shift_estimate(
+            chi, G_avg, A_min=0.5, A_max=2.0
+        )
+
+        # Residual de la First Law (mateix placeholder que a la resta)
+        dM = 1.0
+        TH_dS = 0.99
+        OmegaH_dJ = 0.0
+        FL_R = first_law_residual(
+            dM, TH_dS, OmegaH_dJ, epsM=params.eps * params.M
+        )
+
+        # Triatge
+        decision, _ = triage_decision(G_avg, chi, FL_R)
+
+        results.append((eps, chi, G_avg, dmin, dmax, decision))
+
+    return results
+
+
+def demo() -> None:
+    """
+    Demo amb progress bar i sortida tipus taula de paper
+    per al scan en χ a a* ≈ 0.99.
+    """
+
+    print("===========================================")
+    print("  Θ–Kerr chi scan demo (a* ~ 0.99)        ")
+    print("===========================================\n")
+
+    steps = [
+        "Configurar paràmetres globals (M, a*, Λ, σ_K, σ_Π)",
+        "Definir valors d'ε (i χ)",
+        "Executar chi-scan",
+        "Imprimir taula resum",
+    ]
+    total = len(steps)
+
+    for i, step in enumerate(steps, start=1):
+        bar = "[" + "#" * i + "-" * (total - i) + "]"
+        print(f"{bar} {step}...")
+
+        if i == 1:
+            M = 10.0
+            a_star = 0.99
+            Lambda = 100.0
+            sigma_K = 0.1
+            sigma_Pi = 0.3
+
+        elif i == 2:
+            eps_values = [1.0e-4, 1.0e-3, 1.0e-2]
+
+        elif i == 3:
+            results = chi_scan(
+                M=M,
+                a_star=a_star,
+                Lambda=Lambda,
+                sigma_K=sigma_K,
+                sigma_Pi=sigma_Pi,
+                eps_values=eps_values,
+            )
+
+        elif i == 4:
+            print("\n=========== CHI SCAN (a* = 0.99) ===========")
+            print(
+                "  ε      |   chi      |  <G>_H   |  Δr_ph/r_ph(min)  |  Δr_ph/r_ph(max)  | triage"
+            )
+            print(
+                "---------+-----------+----------+--------------------+--------------------+--------"
+            )
+            for (eps, chi, G_avg, dmin, dmax, decision) in results:
+                print(
+                    f" {eps:7.1e} | "
+                    f"{chi:9.3e} | "
+                    f"{G_avg:8.5f} | "
+                    f"{dmin:18.3e} | "
+                    f"{dmax:18.3e} | "
+                    f"{decision}"
+                )
+            print("============================================\n")
+
+    print("Chi scan Θ–Kerr completada.\n")
+
+
+if __name__ == "__main__":
+    demo()
