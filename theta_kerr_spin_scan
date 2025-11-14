@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""
+theta_kerr_spin_scan.py
+
+Scan en spin a* per al framework Θ–Kerr:
+
+- Per a diferents valors d'a*,
+  calcula χ, <G>_H, Δr_ph/r_ph i la decisió de triage.
+- Útil per generar una taula / figura per al Paper 2.
+"""
+
+import math
+from typing import List, Tuple
+
+from theta_kerr_horizon_gate import KerrBH, horizon_gate_profile
+from theta_kerr_diagnostics import (
+    ThetaKerrParams,
+    photon_sphere_shift_estimate,
+    first_law_residual,
+    triage_decision,
+)
+
+
+def spin_scan(
+    M: float = 10.0,
+    eps: float = 1.0e-3,
+    Lambda: float = 100.0,
+    sigma_K: float = 0.1,
+    sigma_Pi: float = 0.3,
+    spins: List[float] | None = None,
+) -> List[Tuple[float, float, float, float, float, str]]:
+    """
+    Fa un scan en a* i retorna una llista de tuples:
+
+      (a*, chi, <G>_H, Δr_ph/r_ph_min, Δr_ph/r_ph_max, decisio)
+
+    La part de First Law residual s'inclou en la decisió de triage.
+    """
+
+    if spins is None:
+        spins = [0.3, 0.5, 0.7, 0.9, 0.99]
+
+    results: List[Tuple[float, float, float, float, float, str]] = []
+
+    for a_star in spins:
+        # Definim els paràmetres EFT per aquest spin
+        params = ThetaKerrParams(
+            M=M,
+            eps=eps,
+            Lambda=Lambda,
+            a_star=a_star,
+            sigma_K=sigma_K,
+            sigma_Pi=sigma_Pi,
+        )
+
+        chi = params.chi
+
+        # Forat negre de Kerr
+        bh = KerrBH(M=params.M, a=params.a)
+
+        # Càlcul de <G>_H
+        _, _, _, G_avg = horizon_gate_profile(
+            bh,
+            sigma_K=params.sigma_K,
+            sigma_Pi=params.sigma_Pi,
+            n_theta=400,
+        )
+
+        # Estimació Δr_ph/r_ph
+        dmin, dmax = photon_sphere_shift_estimate(
+            chi, G_avg, A_min=0.5, A_max=2.0
+        )
+
+        # Residual de la First Law (placeholder numèric com al demo)
+        dM = 1.0
+        TH_dS = 0.99
+        OmegaH_dJ = 0.0
+        FL_R = first_law_residual(
+            dM, TH_dS, OmegaH_dJ, epsM=params.eps * params.M
+        )
+
+        # Decisió de triage
+        decision, _ = triage_decision(G_avg, chi, FL_R)
+
+        results.append((a_star, chi, G_avg, dmin, dmax, decision))
+
+    return results
+
+
+def demo() -> None:
+    """
+    Demo amb progress bar i sortida tipus paper.
+    """
+
+    print("===========================================")
+    print("  Θ–Kerr spin scan demo                    ")
+    print("===========================================\n")
+
+    steps = [
+        "Configurar paràmetres globals (M, ε, Λ, σ_K, σ_Π)",
+        "Definir valors de spin a*",
+        "Executar scan en a*",
+        "Imprimir taula resum",
+    ]
+    total = len(steps)
+
+    # 1) Paràmetres globals
+    for i, step in enumerate(steps, start=1):
+        bar = "[" + "#" * i + "-" * (total - i) + "]"
+        print(f"{bar} {step}...")
+
+        if i == 1:
+            M = 10.0
+            eps = 1.0e-3
+            Lambda = 100.0
+            sigma_K = 0.1
+            sigma_Pi = 0.3
+
+        elif i == 2:
+            spins = [0.3, 0.5, 0.7, 0.9, 0.99]
+
+        elif i == 3:
+            results = spin_scan(
+                M=M,
+                eps=eps,
+                Lambda=Lambda,
+                sigma_K=sigma_K,
+                sigma_Pi=sigma_Pi,
+                spins=spins,
+            )
+
+        elif i == 4:
+            print("\n=========== SPIN SCAN ===========")
+            print(
+                " a*    |   chi      |  <G>_H   |  Δr_ph/r_ph(min)  |  Δr_ph/r_ph(max)  | triage"
+            )
+            print(
+                "-------+-----------+----------+--------------------+--------------------+--------"
+            )
+            for (a_star, chi, G_avg, dmin, dmax, decision) in results:
+                print(
+                    f" {a_star:4.2f} | "
+                    f"{chi:9.3e} | "
+                    f"{G_avg:8.5f} | "
+                    f"{dmin:18.3e} | "
+                    f"{dmax:18.3e} | "
+                    f"{decision}"
+                )
+            print("=================================\n")
+
+    print("Spin scan Θ–Kerr completada.\n")
+
+
+if __name__ == "__main__":
+    demo()
